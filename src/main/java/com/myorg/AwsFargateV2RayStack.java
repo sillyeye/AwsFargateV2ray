@@ -1,16 +1,14 @@
 package com.myorg;
 
+import software.amazon.awscdk.CfnOutput;
 import software.amazon.awscdk.services.ec2.*;
 import software.amazon.awscdk.services.ecs.*;
 import software.amazon.awscdk.services.ecs.Protocol;
-import software.amazon.awscdk.services.ecs.patterns.*;
-import software.amazon.awscdk.services.elasticloadbalancing.LoadBalancerListener;
 import software.amazon.awscdk.services.elasticloadbalancingv2.*;
 import software.constructs.Construct;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public class AwsFargateV2RayStack extends Stack {
@@ -29,26 +27,7 @@ public class AwsFargateV2RayStack extends Stack {
                 .vpc(vpc)
                 .build();
 
-        int port = 8001;
-
-        // Create a load-balanced Fargate service and make it public
-        //ApplicationLoadBalancedFargateService service = ApplicationLoadBalancedFargateService.Builder.create(this, "MyFargateService")
-        /*
-
-        NetworkLoadBalancedFargateService fargateService = NetworkLoadBalancedFargateService.Builder.create(this, "V2rayFargateService")
-                .cluster(cluster)           // Required
-                .cpu(512)                   // Default is 256
-                .desiredCount(2)            // Default is 1
-                .taskImageOptions(
-                        NetworkLoadBalancedTaskImageOptions.builder()
-                                .image(ContainerImage.fromRegistry("v2ray/official"))
-                                .containerPort(port)
-                                .build())
-                .memoryLimitMiB(1024)       // Default is 512
-                .publicLoadBalancer(true)   // Default is true
-                .listenerPort(port)
-                .build();
-         */
+        final int containerPort = 8001, loadBalancePort = containerPort;
 
         FargateTaskDefinition taskDefinition = FargateTaskDefinition.Builder.create(this, "FargateTaskDefinition")
                 .cpu(512)
@@ -60,8 +39,8 @@ public class AwsFargateV2RayStack extends Stack {
                 .build());
 
         containerDefinition.addPortMappings(PortMapping.builder()
-                .containerPort(port)
-                .hostPort(port)
+                .containerPort(containerPort)
+                .hostPort(containerPort)
                 .protocol(Protocol.TCP)
                 .build());
 
@@ -71,7 +50,7 @@ public class AwsFargateV2RayStack extends Stack {
                 .build();
 
         NetworkListener listener = loadBalancer.addListener("LBListener", BaseNetworkListenerProps.builder()
-                .port(port)
+                .port(loadBalancePort)
                 .build());
 
         FargateService fargateService = FargateService.Builder.create(this, "V2rayFargateService")
@@ -80,41 +59,19 @@ public class AwsFargateV2RayStack extends Stack {
                 .desiredCount(2)
                 .build();
 
-        IEcsLoadBalancerTarget target = fargateService.loadBalancerTarget(LoadBalancerTargetOptions.builder()
-                .containerPort(port)
-                .containerName("V2rayContainer")
-                .build());
-
         listener.addTargets("Target", AddNetworkTargetsProps.builder()
-                .port(port)
-                .targets(List.of(target))
+                .port(containerPort)
+                .targets(List.of(fargateService))
                 .protocol(software.amazon.awscdk.services.elasticloadbalancingv2.Protocol.TCP)
                 .build());
-
-        /*
-        NetworkTargetGroup networkTargetGroup = NetworkTargetGroup.Builder.create(this, "NetworkTargetGroup")
-                .port(port)
-                .vpc(vpc)
-                .protocol(software.amazon.awscdk.services.elasticloadbalancingv2.Protocol.TCP)
-                .targets(list).build();
-
-        ArrayList<INetworkLoadBalancerTarget> list2 = new ArrayList<INetworkLoadBalancerTarget>();
-        list2.add(networkTargetGroup);
-        fargateService.registerLoadBalancerTargets(EcsTarget.builder()
-                .containerName("V2rayContainer")
-                .containerPort(port)
-                .newTargetGroupId("ECS")
-                .listener(ListenerConfig.networkListener(listener, AddNetworkTargetsProps.builder()
-                        .port(port)
-                        .protocol(software.amazon.awscdk.services.elasticloadbalancingv2.Protocol.TCP)
-                        .build()))
-                .build());
-         */
 
         fargateService.getConnections()
-        //fargateService.getService().getConnections()
                 .getSecurityGroups()
                 .get(0)
-                .addIngressRule(Peer.ipv4(vpc.getVpcCidrBlock()), Port.tcp(port), "allow http inbound from vpc");
+                .addIngressRule(Peer.ipv4(vpc.getVpcCidrBlock()), Port.tcp(containerPort), "allow http inbound from vpc");
+
+        CfnOutput.Builder.create(this, "Load Balance domain name")
+                .value(loadBalancer.getLoadBalancerDnsName())
+                .build();
     }
 }
